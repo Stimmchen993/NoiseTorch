@@ -173,10 +173,23 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 			w.Label("Microphone Processing (PipeWire)", "LC")
 
 			w.Row(15).Dynamic(2)
-			if w.CheckboxText("RNNoise Denoise", &ctx.config.MicEnableRNNoise) {
+			if w.CheckboxText("Enable Denoiser Stage", &ctx.config.MicEnableRNNoise) {
 				go writeConfig(ctx.config)
 				ctx.reloadRequired = true
 			}
+			if w.CheckboxText("Use DeepFilterNet (LADSPA)", &ctx.config.MicUseDeepFilterNet) {
+				go writeConfig(ctx.config)
+				ctx.reloadRequired = true
+			}
+
+			w.Row(15).Dynamic(1)
+			if ctx.config.MicUseDeepFilterNet {
+				w.Label("Denoiser Backend: DeepFilterNet (higher quality, requires libdeep_filter_ladspa.so)", "LC")
+			} else {
+				w.Label("Denoiser Backend: RNNoise", "LC")
+			}
+
+			w.Row(15).Dynamic(1)
 			if w.CheckboxText("WebRTC Speech Processing", &ctx.config.MicEnableWebRTC) {
 				go writeConfig(ctx.config)
 				ctx.reloadRequired = true
@@ -580,6 +593,7 @@ func resetUI(ctx *ntcontext) {
 
 func applyFarFieldRoomPreset(ctx *ntcontext) {
 	ctx.config.MicEnableRNNoise = true
+	ctx.config.MicUseDeepFilterNet = false
 	ctx.config.MicEnableWebRTC = true
 	ctx.config.MicWebRTCNoiseSuppress = true
 	ctx.config.MicWebRTCAutoGain = true

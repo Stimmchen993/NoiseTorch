@@ -23,6 +23,8 @@ type config struct {
 	LastUsedInput          string
 	LastUsedOutput         string
 	MicEnableRNNoise       bool
+	MicUseDeepFilterNet    bool
+	MicDeepFilterControl   string
 	MicEnableWebRTC        bool
 	MicWebRTCNoiseSuppress bool
 	MicWebRTCAutoGain      bool
@@ -53,6 +55,8 @@ func initializeConfigIfNot() {
 		LastUsedInput:          "",
 		LastUsedOutput:         "",
 		MicEnableRNNoise:       true,
+		MicUseDeepFilterNet:    false,
+		MicDeepFilterControl:   "100,0.0,-10,30,20,0",
 		MicEnableWebRTC:        false,
 		MicWebRTCNoiseSuppress: true,
 		MicWebRTCAutoGain:      true,
@@ -124,9 +128,13 @@ func applyConfigDefaults(conf *config) {
 	if conf.MicInputGainPercent > 300 {
 		conf.MicInputGainPercent = 300
 	}
+	if conf.MicDeepFilterControl == "" {
+		conf.MicDeepFilterControl = "100,0.0,-10,30,20,0"
+	}
 
 	// Migrate pre-feature configs where these values were absent.
 	if !conf.MicEnableRNNoise &&
+		!conf.MicUseDeepFilterNet &&
 		!conf.MicEnableWebRTC &&
 		!conf.MicWebRTCNoiseSuppress &&
 		!conf.MicWebRTCAutoGain &&
@@ -136,6 +144,7 @@ func applyConfigDefaults(conf *config) {
 		!conf.MicWebRTCExtended &&
 		!conf.MicWebRTCDelayAgnostic {
 		conf.MicEnableRNNoise = true
+		conf.MicUseDeepFilterNet = false
 		conf.MicWebRTCNoiseSuppress = true
 		conf.MicWebRTCAutoGain = true
 		conf.MicWebRTCAnalogGain = false

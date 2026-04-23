@@ -6,7 +6,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/noisetorch/pulseaudio"
@@ -23,6 +25,12 @@ const (
 	pipewireWebRTCMicSink    = "nui_pw_mic_webrtc_sink"
 	pipewireWebRTCMicRefSink = "nui_pw_mic_webrtc_ref_sink"
 )
+
+type ladspaDenoiserConfig struct {
+	plugin  string
+	label   string
+	control string
+}
 
 // the ugly and (partially) repeated strings are unforunately difficult to avoid, as it's what pulse audio expects
 
@@ -256,18 +264,20 @@ func loadPipeWireInput(ctx *ntcontext, inp *device) error {
 		stageSource = pipewireWebRTCMicSource
 	}
 
-	pluginPath := ctx.librnnoise
-	if p, err := ensurePersistentRNNoisePlugin(ctx); err == nil {
-		pluginPath = p
-	} else {
-		log.Printf("Couldn't persist rnnoise plugin for PipeWire mode, falling back to temporary path: %v\n", err)
+	denoiser, err := resolveLadspaDenoiserConfig(ctx)
+	if err != nil {
+		return err
 	}
 
 	if ctx.config.MicEnableRNNoise {
+		moduleArgs := fmt.Sprintf("source_name='Filtered Microphone for %s' master=%s rate=48000 channels=1 label=%s plugin=%s",
+			inp.Name, stageSource, denoiser.label, denoiser.plugin)
+		if denoiser.control != "" {
+			moduleArgs += " control=" + denoiser.control
+		}
+
 		idx, err := loadModule(ctx, "module-ladspa-source",
-			fmt.Sprintf("source_name='Filtered Microphone for %s' master=%s "+
-				"rate=48000 channels=1 "+
-				"label=nt-filter plugin=%s control=%d", inp.Name, stageSource, pluginPath, ctx.config.Threshold))
+			moduleArgs)
 		if err != nil {
 			return err
 		}
@@ -580,4 +590,47 @@ func applyInputMicGain(ctx *ntcontext, inputSourceID string) error {
 		return fmt.Errorf("set-source-volume failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func resolveLadspaDenoiserConfig(ctx *ntcontext) (ladspaDenoiserConfig, error) {
+	if ctx.config.MicUseDeepFilterNet {
+		if path, ok := findDeepFilterPluginPath(); ok {
+			control := strings.TrimSpace(ctx.config.MicDeepFilterControl)
+			return ladspaDenoiserConfig{
+				plugin:  path,
+				label:   "deep_filter_mono",
+				control: control,
+			}, nil
+		}
+		return ladspaDenoiserConfig{}, fmt.Errorf("DeepFilterNet selected but plugin not found. Install libdeep_filter_ladspa.so in ~/.local/lib/ladspa, /usr/lib/ladspa, or /usr/lib64/ladspa")
+	}
+
+	pluginPath := ctx.librnnoise
+	if p, err := ensurePersistentRNNoisePlugin(ctx); err == nil {
+		pluginPath = p
+	} else {
+		log.Printf("Couldn't persist rnnoise plugin for PipeWire mode, falling back to temporary path: %v\n", err)
+	}
+
+	return ladspaDenoiserConfig{
+		plugin:  pluginPath,
+		label:   "nt-filter",
+		control: fmt.Sprintf("%d", ctx.config.Threshold),
+	}, nil
+}
+
+func findDeepFilterPluginPath() (string, bool) {
+	home := os.Getenv("HOME")
+	candidates := []string{
+		filepath.Join(home, ".local", "lib", "ladspa", "libdeep_filter_ladspa.so"),
+		filepath.Join(home, ".ladspa", "libdeep_filter_ladspa.so"),
+		"/usr/lib64/ladspa/libdeep_filter_ladspa.so",
+		"/usr/lib/ladspa/libdeep_filter_ladspa.so",
+	}
+	for _, path := range candidates {
+		if st, err := os.Stat(path); err == nil && !st.IsDir() {
+			return path, true
+		}
+	}
+	return "", false
 }
