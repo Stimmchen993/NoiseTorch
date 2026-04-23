@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os/exec"
 	"strings"
 
 	"github.com/noisetorch/pulseaudio"
@@ -218,7 +219,8 @@ func boolToInt(v bool) int {
 }
 
 func pipeWireWebRTCAecArgs(ctx *ntcontext) string {
-	return fmt.Sprintf("analog_gain_control=0 digital_gain_control=%d noise_suppression=%d voice_detection=%d high_pass_filter=%d extended_filter=%d delay_agnostic=%d",
+	return fmt.Sprintf("analog_gain_control=%d digital_gain_control=%d noise_suppression=%d voice_detection=%d high_pass_filter=%d extended_filter=%d delay_agnostic=%d",
+		boolToInt(ctx.config.MicWebRTCAnalogGain),
 		boolToInt(ctx.config.MicWebRTCAutoGain),
 		boolToInt(ctx.config.MicWebRTCNoiseSuppress),
 		boolToInt(ctx.config.MicWebRTCVoiceDetect),
@@ -270,6 +272,9 @@ func loadPipeWireInput(ctx *ntcontext, inp *device) error {
 			return err
 		}
 		log.Printf("Loaded ladspa source as idx: %d\n", idx)
+		if err := applyInputMicGain(ctx, inp.ID); err != nil {
+			log.Printf("Couldn't apply input mic gain: %v\n", err)
+		}
 		return nil
 	}
 
@@ -280,6 +285,9 @@ func loadPipeWireInput(ctx *ntcontext, inp *device) error {
 		return err
 	}
 	log.Printf("Loaded remap source as idx: %d\n", idx)
+	if err := applyInputMicGain(ctx, inp.ID); err != nil {
+		log.Printf("Couldn't apply input mic gain: %v\n", err)
+	}
 	return nil
 }
 
@@ -554,4 +562,22 @@ func unloadAllMatching(c *pulseaudio.Client, name string, argMatch string) error
 		c.UnloadModule(m.Index)
 	}
 	return fmt.Errorf("failed to unload all matching modules for %s (%s)", name, argMatch)
+}
+
+func applyInputMicGain(ctx *ntcontext, inputSourceID string) error {
+	if inputSourceID == "" {
+		return fmt.Errorf("input name is empty")
+	}
+	gain := ctx.config.MicInputGainPercent
+	if gain < 25 {
+		gain = 25
+	}
+	if gain > 300 {
+		gain = 300
+	}
+	cmd := exec.Command("pactl", "set-source-volume", inputSourceID, fmt.Sprintf("%d%%", gain))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("set-source-volume failed: %w (%s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }

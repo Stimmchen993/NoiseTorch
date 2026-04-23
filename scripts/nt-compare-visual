@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  nt-compare-visual [SOURCE_A] [SOURCE_B]
+  nt-compare-visual --list
+
+Description:
+  Live visual A/B comparison of two PulseAudio/PipeWire sources.
+  Top pair = SOURCE_A (green), bottom pair = SOURCE_B (amber).
+  Each source shows a level meter + waveform in real time.
+
+Examples:
+  nt-compare-visual
+  nt-compare-visual "Studio_Input_1" "Filtered Microphone for 1 Studio In"
+  nt-compare-visual --list
+USAGE
+}
+
+list_sources() {
+  pactl list short sources | cut -f2
+}
+
+choose_default_a() {
+  if list_sources | rg -qx "Studio_Input_1"; then
+    echo "Studio_Input_1"
+    return
+  fi
+  list_sources | head -n1
+}
+
+choose_default_b() {
+  local candidate
+  candidate="$(list_sources | rg "^Filtered Microphone" | head -n1 || true)"
+  if [[ -n "$candidate" ]]; then
+    echo "$candidate"
+    return
+  fi
+  candidate="$(list_sources | rg -x "Virtual_Mic" || true)"
+  if [[ -n "$candidate" ]]; then
+    echo "$candidate"
+    return
+  fi
+  list_sources | tail -n1
+}
+
+if [[ "${1-}" == "--help" || "${1-}" == "-h" ]]; then
+  usage
+  exit 0
+fi
+
+if [[ "${1-}" == "--list" ]]; then
+  pactl list short sources
+  exit 0
+fi
+
+if ! command -v ffplay >/dev/null 2>&1; then
+  echo "ffplay is required but not found." >&2
+  exit 1
+fi
+if ! command -v pactl >/dev/null 2>&1; then
+  echo "pactl is required but not found." >&2
+  exit 1
+fi
+
+SRC_A="${1-}"
+SRC_B="${2-}"
+
+if [[ -z "$SRC_A" ]]; then
+  SRC_A="$(choose_default_a)"
+fi
+if [[ -z "$SRC_B" ]]; then
+  SRC_B="$(choose_default_b)"
+fi
+
+if ! list_sources | rg -qx -- "$SRC_A"; then
+  echo "Source A not found: $SRC_A" >&2
+  echo "Use --list to see available sources." >&2
+  exit 1
+fi
+if ! list_sources | rg -qx -- "$SRC_B"; then
+  echo "Source B not found: $SRC_B" >&2
+  echo "Use --list to see available sources." >&2
+  exit 1
+fi
+
+echo "Comparing live sources:"
+echo "  A (top, green):  $SRC_A"
+echo "  B (bottom, amber): $SRC_B"
+echo "Press q in the ffplay window to quit."
+
+SRC_A_ESC="${SRC_A//\'/\\\'}"
+SRC_B_ESC="${SRC_B//\'/\\\'}"
+
+GRAPH="\
+amovie='${SRC_A_ESC}':format_name=pulse,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=mono,asplit=2[a0m][a0w]; \
+amovie='${SRC_B_ESC}':format_name=pulse,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=mono,asplit=2[a1m][a1w]; \
+[a0m]showvolume=r=30:w=1280:h=100:f=0:t=0:v=0:p=0:dm=1,format=yuv420p[m0]; \
+[a0w]showwaves=s=1280x220:mode=line:rate=30:colors=0x4df28a,format=yuv420p[w0]; \
+[a1m]showvolume=r=30:w=1280:h=100:f=0:t=0:v=0:p=0:dm=1,format=yuv420p[m1]; \
+[a1w]showwaves=s=1280x220:mode=line:rate=30:colors=0xf5b14c,format=yuv420p[w1]; \
+[m0][w0][m1][w1]vstack=inputs=4,format=yuv420p"
+
+ffplay -hide_banner -loglevel error \
+  -fflags nobuffer -flags low_delay \
+  -f lavfi "$GRAPH" -an \
+  -window_title "NT Compare Visual: A(top) vs B(bottom)" \
+  -x 1280 -y 640

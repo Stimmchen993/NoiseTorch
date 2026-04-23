@@ -15,6 +15,7 @@ import (
 
 type config struct {
 	Threshold              int
+	MicInputGainPercent    int
 	DisplayMonitorSources  bool
 	EnableUpdates          bool
 	FilterInput            bool
@@ -25,6 +26,7 @@ type config struct {
 	MicEnableWebRTC        bool
 	MicWebRTCNoiseSuppress bool
 	MicWebRTCAutoGain      bool
+	MicWebRTCAnalogGain    bool
 	MicWebRTCVoiceDetect   bool
 	MicWebRTCHighPass      bool
 	MicWebRTCExtended      bool
@@ -43,6 +45,7 @@ func initializeConfigIfNot() {
 	// This isn't and never was the proper location to disable the updater.
 	conf := config{
 		Threshold:              95,
+		MicInputGainPercent:    100,
 		DisplayMonitorSources:  false,
 		EnableUpdates:          true,
 		FilterInput:            true,
@@ -53,6 +56,7 @@ func initializeConfigIfNot() {
 		MicEnableWebRTC:        false,
 		MicWebRTCNoiseSuppress: true,
 		MicWebRTCAutoGain:      true,
+		MicWebRTCAnalogGain:    false,
 		MicWebRTCVoiceDetect:   true,
 		MicWebRTCHighPass:      true,
 		MicWebRTCExtended:      true,
@@ -111,11 +115,22 @@ func writeConfig(conf *config) {
 }
 
 func applyConfigDefaults(conf *config) {
+	if conf.MicInputGainPercent == 0 {
+		conf.MicInputGainPercent = 100
+	}
+	if conf.MicInputGainPercent < 25 {
+		conf.MicInputGainPercent = 25
+	}
+	if conf.MicInputGainPercent > 300 {
+		conf.MicInputGainPercent = 300
+	}
+
 	// Migrate pre-feature configs where these values were absent.
 	if !conf.MicEnableRNNoise &&
 		!conf.MicEnableWebRTC &&
 		!conf.MicWebRTCNoiseSuppress &&
 		!conf.MicWebRTCAutoGain &&
+		!conf.MicWebRTCAnalogGain &&
 		!conf.MicWebRTCVoiceDetect &&
 		!conf.MicWebRTCHighPass &&
 		!conf.MicWebRTCExtended &&
@@ -123,6 +138,7 @@ func applyConfigDefaults(conf *config) {
 		conf.MicEnableRNNoise = true
 		conf.MicWebRTCNoiseSuppress = true
 		conf.MicWebRTCAutoGain = true
+		conf.MicWebRTCAnalogGain = false
 		conf.MicWebRTCVoiceDetect = true
 		conf.MicWebRTCHighPass = true
 		conf.MicWebRTCExtended = true

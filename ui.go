@@ -144,6 +144,25 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 		}
 		w.Label(fmt.Sprintf("%d%%", ctx.config.Threshold), "RC")
 
+		w.Row(25).Ratio(0.5, 0.45, 0.05)
+		w.Label("Mic Input Trim", "LC")
+		if w.Input().Mouse.HoveringRect(w.LastWidgetBounds) {
+			w.Tooltip("Applies gain to the selected physical microphone source before processing.")
+		}
+		if w.SliderInt(25, &ctx.config.MicInputGainPercent, 300, 1) {
+			go writeConfig(ctx.config)
+			if ctx.noiseSupressorState == loaded {
+				if inp, ok := inputSelection(ctx); ok {
+					go func() {
+						if err := applyInputMicGain(ctx, inp.ID); err != nil {
+							log.Printf("Couldn't apply input mic gain live: %v\n", err)
+						}
+					}()
+				}
+			}
+		}
+		w.Label(fmt.Sprintf("%d%%", ctx.config.MicInputGainPercent), "RC")
+
 		if ctx.reloadRequired {
 			w.Row(20).Dynamic(1)
 			w.LabelColored("Reloading the filter(s) is required to apply these changes.", "LC", orange)
@@ -165,7 +184,7 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 
 			if ctx.config.MicEnableWebRTC {
 				w.Row(15).Dynamic(2)
-				if w.CheckboxText("WebRTC Noise Suppression", &ctx.config.MicWebRTCNoiseSuppress) {
+				if w.CheckboxText("WebRTC Analog AGC", &ctx.config.MicWebRTCAnalogGain) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
 				}
@@ -175,6 +194,10 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 				}
 
 				w.Row(15).Dynamic(2)
+				if w.CheckboxText("WebRTC Noise Suppression", &ctx.config.MicWebRTCNoiseSuppress) {
+					go writeConfig(ctx.config)
+					ctx.reloadRequired = true
+				}
 				if w.CheckboxText("WebRTC Voice Detection", &ctx.config.MicWebRTCVoiceDetect) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
@@ -560,6 +583,7 @@ func applyFarFieldRoomPreset(ctx *ntcontext) {
 	ctx.config.MicEnableWebRTC = true
 	ctx.config.MicWebRTCNoiseSuppress = true
 	ctx.config.MicWebRTCAutoGain = true
+	ctx.config.MicWebRTCAnalogGain = false
 	ctx.config.MicWebRTCVoiceDetect = true
 	ctx.config.MicWebRTCHighPass = true
 	ctx.config.MicWebRTCExtended = true
