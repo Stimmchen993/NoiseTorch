@@ -17,6 +17,11 @@ const (
 	inconsistent
 )
 
+const (
+	pipewireWebRTCMicSource = "nui_pw_mic_webrtc_src"
+	pipewireWebRTCMicSink   = "nui_pw_mic_webrtc_sink"
+)
+
 // the ugly and (partially) repeated strings are unforunately difficult to avoid, as it's what pulse audio expects
 
 func updateNoiseSupressorLoaded(ctx *ntcontext) {
@@ -48,9 +53,17 @@ func supressorState(ctx *ntcontext) (int, bool) {
 			if err != nil {
 				log.Printf("Couldn't fetch module list to check for module-ladspa-source: %v\n", err)
 			}
-			virtualDeviceInUse = virtualDeviceInUse || (module.NUsed != 0)
-			inpLoaded = ladspasource
-			inputInc = false
+			remapModule, remapsource, err := findModule(c, "module-remap-source", "source_name='Filtered Microphone")
+			if err != nil {
+				log.Printf("Couldn't fetch module list to check for module-remap-source: %v\n", err)
+			}
+			webrtcModule, webrtcsource, err := findModule(c, "module-echo-cancel", "source_name="+pipewireWebRTCMicSource)
+			if err != nil {
+				log.Printf("Couldn't fetch module list to check for module-echo-cancel: %v\n", err)
+			}
+			virtualDeviceInUse = virtualDeviceInUse || (module.NUsed != 0) || (remapModule.NUsed != 0) || (webrtcModule.NUsed != 0)
+			inpLoaded = ladspasource || remapsource
+			inputInc = !inpLoaded && webrtcsource
 		} else {
 			_, nullsink, err := findModule(c, "module-null-sink", "sink_name=nui_mic_denoised_out")
 			if err != nil {
@@ -159,7 +172,7 @@ func loadSupressor(ctx *ntcontext, inp *device, out *device) error {
 	if inp.checked {
 		var err error
 		if ctx.serverInfo.servertype == servertype_pipewire {
-			err = loadPipeWireInputLegacy(ctx, inp)
+			err = loadPipeWireInput(ctx, inp)
 		} else {
 			err = loadPulseInput(ctx, inp)
 		}
@@ -196,8 +209,44 @@ func loadModule(ctx *ntcontext, module, args string) (uint32, error) {
 	return idx, err
 }
 
-func loadPipeWireInputLegacy(ctx *ntcontext, inp *device) error {
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
+
+func pipeWireWebRTCAecArgs(ctx *ntcontext) string {
+	return fmt.Sprintf("analog_gain_control=0 digital_gain_control=%d noise_suppression=%d voice_detection=%d high_pass_filter=%d extended_filter=%d delay_agnostic=%d",
+		boolToInt(ctx.config.MicWebRTCAutoGain),
+		boolToInt(ctx.config.MicWebRTCNoiseSuppress),
+		boolToInt(ctx.config.MicWebRTCVoiceDetect),
+		boolToInt(ctx.config.MicWebRTCHighPass),
+		boolToInt(ctx.config.MicWebRTCExtended),
+		boolToInt(ctx.config.MicWebRTCDelayAgnostic),
+	)
+}
+
+func loadPipeWireInput(ctx *ntcontext, inp *device) error {
 	log.Printf("Loading supressor for pipewire\n")
+
+	stageSource := inp.ID
+	if ctx.config.MicEnableWebRTC {
+		sinkMaster, err := getDefaultSinkID(ctx.paClient)
+		if err != nil || sinkMaster == "" {
+			sinkMaster = "@DEFAULT_SINK@"
+		}
+
+		aecArgs := pipeWireWebRTCAecArgs(ctx)
+		idx, err := loadModule(ctx, "module-echo-cancel",
+			fmt.Sprintf("source_name=%s sink_name=%s source_master=%s sink_master=%s aec_method=webrtc aec_args=\"%s\"",
+				pipewireWebRTCMicSource, pipewireWebRTCMicSink, inp.ID, sinkMaster, aecArgs))
+		if err != nil {
+			return err
+		}
+		log.Printf("Loaded module-echo-cancel as idx: %d\n", idx)
+		stageSource = pipewireWebRTCMicSource
+	}
 
 	pluginPath := ctx.librnnoise
 	if p, err := ensurePersistentRNNoisePlugin(ctx); err == nil {
@@ -206,15 +255,25 @@ func loadPipeWireInputLegacy(ctx *ntcontext, inp *device) error {
 		log.Printf("Couldn't persist rnnoise plugin for PipeWire mode, falling back to temporary path: %v\n", err)
 	}
 
-	idx, err := loadModule(ctx, "module-ladspa-source",
-		fmt.Sprintf("source_name='Filtered Microphone for %s' master=%s "+
-			"rate=48000 channels=1 "+
-			"label=nt-filter plugin=%s control=%d", inp.Name, inp.ID, pluginPath, ctx.config.Threshold))
+	if ctx.config.MicEnableRNNoise {
+		idx, err := loadModule(ctx, "module-ladspa-source",
+			fmt.Sprintf("source_name='Filtered Microphone for %s' master=%s "+
+				"rate=48000 channels=1 "+
+				"label=nt-filter plugin=%s control=%d", inp.Name, stageSource, pluginPath, ctx.config.Threshold))
+		if err != nil {
+			return err
+		}
+		log.Printf("Loaded ladspa source as idx: %d\n", idx)
+		return nil
+	}
 
+	idx, err := loadModule(ctx, "module-remap-source",
+		fmt.Sprintf("master=%s source_name='Filtered Microphone for %s' source_properties=\"device.description='Filtered Microphone for %s'\"",
+			stageSource, inp.Name, inp.Name))
 	if err != nil {
 		return err
 	}
-	log.Printf("Loaded ladspa source as idx: %d\n", idx)
+	log.Printf("Loaded remap source as idx: %d\n", idx)
 	return nil
 }
 
@@ -323,26 +382,26 @@ func unloadSupressor(ctx *ntcontext) error {
 
 func unloadSupressorPipeWire(ctx *ntcontext) error {
 	log.Printf("Unloading modules for pipewire\n")
+	c := ctx.paClient
 
 	log.Printf("Searching for module-ladspa-source\n")
-	c := ctx.paClient
-	m, found, err := findModule(c, "module-ladspa-source", "source_name='Filtered Microphone")
-	if err != nil {
+	if err := unloadAllMatching(c, "module-ladspa-source", "source_name='Filtered Microphone"); err != nil {
 		return err
-	}
-	if found {
-		log.Printf("Found module-ladspa-source at id [%d], sending unload command\n", m.Index)
-		c.UnloadModule(m.Index)
 	}
 
 	log.Printf("Searching for module-ladspa-sink\n")
-	m, found, err = findModule(c, "module-ladspa-sink", "sink_name='Filtered Headphones'")
-	if err != nil {
+	if err := unloadAllMatching(c, "module-ladspa-sink", "sink_name='Filtered Headphones'"); err != nil {
 		return err
 	}
-	if found {
-		log.Printf("Found module-ladspa-sink at id [%d], sending unload command\n", m.Index)
-		c.UnloadModule(m.Index)
+
+	log.Printf("Searching for module-remap-source\n")
+	if err := unloadAllMatching(c, "module-remap-source", "source_name='Filtered Microphone"); err != nil {
+		return err
+	}
+
+	log.Printf("Searching for module-echo-cancel\n")
+	if err := unloadAllMatching(c, "module-echo-cancel", "source_name="+pipewireWebRTCMicSource); err != nil {
+		return err
 	}
 	return nil
 }
@@ -469,4 +528,19 @@ func findModule(c *pulseaudio.Client, name string, argMatch string) (module puls
 	}
 
 	return pulseaudio.Module{}, false, nil
+}
+
+func unloadAllMatching(c *pulseaudio.Client, name string, argMatch string) error {
+	for i := 0; i < 32; i++ {
+		m, found, err := findModule(c, name, argMatch)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return nil
+		}
+		log.Printf("Found %s at id [%d], sending unload command\n", name, m.Index)
+		c.UnloadModule(m.Index)
+	}
+	return fmt.Errorf("failed to unload all matching modules for %s (%s)", name, argMatch)
 }

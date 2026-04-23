@@ -14,13 +14,21 @@ import (
 )
 
 type config struct {
-	Threshold             int
-	DisplayMonitorSources bool
-	EnableUpdates         bool
-	FilterInput           bool
-	FilterOutput          bool
-	LastUsedInput         string
-	LastUsedOutput        string
+	Threshold              int
+	DisplayMonitorSources  bool
+	EnableUpdates          bool
+	FilterInput            bool
+	FilterOutput           bool
+	LastUsedInput          string
+	LastUsedOutput         string
+	MicEnableRNNoise       bool
+	MicEnableWebRTC        bool
+	MicWebRTCNoiseSuppress bool
+	MicWebRTCAutoGain      bool
+	MicWebRTCVoiceDetect   bool
+	MicWebRTCHighPass      bool
+	MicWebRTCExtended      bool
+	MicWebRTCDelayAgnostic bool
 }
 
 const configFile = "config.toml"
@@ -34,13 +42,21 @@ func initializeConfigIfNot() {
 	// Unless you set -tags release on the build the updater is *not* compiled in anymore. DO NOT MESS WITH THIS!
 	// This isn't and never was the proper location to disable the updater.
 	conf := config{
-		Threshold:             95,
-		DisplayMonitorSources: false,
-		EnableUpdates:         true,
-		FilterInput:           true,
-		FilterOutput:          false,
-		LastUsedInput:         "",
-		LastUsedOutput:        ""}
+		Threshold:              95,
+		DisplayMonitorSources:  false,
+		EnableUpdates:          true,
+		FilterInput:            true,
+		FilterOutput:           false,
+		LastUsedInput:          "",
+		LastUsedOutput:         "",
+		MicEnableRNNoise:       true,
+		MicEnableWebRTC:        false,
+		MicWebRTCNoiseSuppress: true,
+		MicWebRTCAutoGain:      true,
+		MicWebRTCVoiceDetect:   true,
+		MicWebRTCHighPass:      true,
+		MicWebRTCExtended:      true,
+		MicWebRTCDelayAgnostic: true}
 
 	configdir := configDir()
 	ok, err := exists(configdir)
@@ -73,6 +89,7 @@ func readConfig() *config {
 	if _, err := toml.DecodeFile(f, &config); err != nil {
 		log.Fatalf("Couldn't read config file: %v\n", err)
 	}
+	applyConfigDefaults(&config)
 
 	return &config
 }
@@ -80,6 +97,7 @@ func readConfig() *config {
 func writeConfig(conf *config) {
 	configFileMu.Lock()
 	defer configFileMu.Unlock()
+	applyConfigDefaults(conf)
 
 	f := filepath.Join(configDir(), configFile)
 	var buffer bytes.Buffer
@@ -89,6 +107,26 @@ func writeConfig(conf *config) {
 	}
 	if err := os.WriteFile(f, buffer.Bytes(), 0644); err != nil {
 		log.Printf("Couldn't write config file: %v\n", err)
+	}
+}
+
+func applyConfigDefaults(conf *config) {
+	// Migrate pre-feature configs where these values were absent.
+	if !conf.MicEnableRNNoise &&
+		!conf.MicEnableWebRTC &&
+		!conf.MicWebRTCNoiseSuppress &&
+		!conf.MicWebRTCAutoGain &&
+		!conf.MicWebRTCVoiceDetect &&
+		!conf.MicWebRTCHighPass &&
+		!conf.MicWebRTCExtended &&
+		!conf.MicWebRTCDelayAgnostic {
+		conf.MicEnableRNNoise = true
+		conf.MicWebRTCNoiseSuppress = true
+		conf.MicWebRTCAutoGain = true
+		conf.MicWebRTCVoiceDetect = true
+		conf.MicWebRTCHighPass = true
+		conf.MicWebRTCExtended = true
+		conf.MicWebRTCDelayAgnostic = true
 	}
 }
 

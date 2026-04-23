@@ -149,6 +149,60 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 			w.LabelColored("Reloading the filter(s) is required to apply these changes.", "LC", orange)
 		}
 
+		if ctx.serverInfo.servertype == servertype_pipewire && ctx.config.FilterInput {
+			w.Row(20).Dynamic(1)
+			w.Label("Microphone Processing (PipeWire)", "LC")
+
+			w.Row(15).Dynamic(2)
+			if w.CheckboxText("RNNoise Denoise", &ctx.config.MicEnableRNNoise) {
+				go writeConfig(ctx.config)
+				ctx.reloadRequired = true
+			}
+			if w.CheckboxText("WebRTC Speech Processing", &ctx.config.MicEnableWebRTC) {
+				go writeConfig(ctx.config)
+				ctx.reloadRequired = true
+			}
+
+			if ctx.config.MicEnableWebRTC {
+				w.Row(15).Dynamic(2)
+				if w.CheckboxText("WebRTC Noise Suppression", &ctx.config.MicWebRTCNoiseSuppress) {
+					go writeConfig(ctx.config)
+					ctx.reloadRequired = true
+				}
+				if w.CheckboxText("WebRTC Auto Gain", &ctx.config.MicWebRTCAutoGain) {
+					go writeConfig(ctx.config)
+					ctx.reloadRequired = true
+				}
+
+				w.Row(15).Dynamic(2)
+				if w.CheckboxText("WebRTC Voice Detection", &ctx.config.MicWebRTCVoiceDetect) {
+					go writeConfig(ctx.config)
+					ctx.reloadRequired = true
+				}
+				if w.CheckboxText("WebRTC High-Pass", &ctx.config.MicWebRTCHighPass) {
+					go writeConfig(ctx.config)
+					ctx.reloadRequired = true
+				}
+
+				w.Row(15).Dynamic(2)
+				if w.CheckboxText("WebRTC Extended Filter", &ctx.config.MicWebRTCExtended) {
+					go writeConfig(ctx.config)
+					ctx.reloadRequired = true
+				}
+				if w.CheckboxText("WebRTC Delay Agnostic", &ctx.config.MicWebRTCDelayAgnostic) {
+					go writeConfig(ctx.config)
+					ctx.reloadRequired = true
+				}
+			}
+
+			w.Row(25).Dynamic(1)
+			if w.ButtonText("Apply Far-Field Room Preset") {
+				applyFarFieldRoomPreset(ctx)
+				go writeConfig(ctx.config)
+				ctx.reloadRequired = true
+			}
+		}
+
 		w.Row(15).Dynamic(2)
 		if w.CheckboxText("Filter Microphone", &ctx.config.FilterInput) {
 			ctx.sourceListColdWidthIndex++ //recompute the with because of new elements
@@ -498,5 +552,22 @@ func resetUI(ctx *ntcontext) {
 		ctx.views.Push(makeFatalErrorView(ctx,
 			fmt.Sprintf("Your PipeWire version is too old. Detected %d.%d.%d. Require at least 0.3.28.",
 				ctx.serverInfo.major, ctx.serverInfo.minor, ctx.serverInfo.patch)))
+	}
+}
+
+func applyFarFieldRoomPreset(ctx *ntcontext) {
+	ctx.config.MicEnableRNNoise = true
+	ctx.config.MicEnableWebRTC = true
+	ctx.config.MicWebRTCNoiseSuppress = true
+	ctx.config.MicWebRTCAutoGain = true
+	ctx.config.MicWebRTCVoiceDetect = true
+	ctx.config.MicWebRTCHighPass = true
+	ctx.config.MicWebRTCExtended = true
+	ctx.config.MicWebRTCDelayAgnostic = true
+
+	// A slightly less aggressive trigger keeps far-field speech audible while
+	// avoiding excessive ambience pumping.
+	if ctx.config.Threshold > 80 || ctx.config.Threshold == 0 {
+		ctx.config.Threshold = 80
 	}
 }
