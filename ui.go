@@ -237,6 +237,13 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 				go writeConfig(ctx.config)
 				ctx.reloadRequired = true
 			}
+
+			w.Row(25).Dynamic(1)
+			if w.ButtonText("Apply Singing / Karaoke AEC Preset") {
+				applySingingAecPreset(ctx)
+				go writeConfig(ctx.config)
+				ctx.reloadRequired = true
+			}
 		}
 
 		w.Row(15).Dynamic(2)
@@ -608,4 +615,21 @@ func applyFarFieldRoomPreset(ctx *ntcontext) {
 	if ctx.config.Threshold > 80 || ctx.config.Threshold == 0 {
 		ctx.config.Threshold = 80
 	}
+}
+
+func applySingingAecPreset(ctx *ntcontext) {
+	// Keep echo cancellation enabled but disable speech-specific stages that
+	// often swallow near-end voice during double-talk (music + singing).
+	ctx.config.MicEnableWebRTC = true
+	ctx.config.MicWebRTCNoiseSuppress = false
+	ctx.config.MicWebRTCAutoGain = false
+	ctx.config.MicWebRTCAnalogGain = false
+	ctx.config.MicWebRTCVoiceDetect = false
+	ctx.config.MicWebRTCHighPass = false
+	ctx.config.MicWebRTCExtended = true
+	ctx.config.MicWebRTCDelayAgnostic = true
+
+	// Speech denoisers can heavily attenuate singing timbre, so disable by default.
+	ctx.config.MicEnableRNNoise = false
+	ctx.config.MicUseDeepFilterNet = false
 }
