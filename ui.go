@@ -126,6 +126,12 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 
 	if w.TreePush(nucular.TreeTab, "Settings", true) {
 		w.Row(15).Dynamic(2)
+		if w.CheckboxText("Auto-Apply AEC Profile", &ctx.config.MicAutoProfile) {
+			go writeConfig(ctx.config)
+		}
+		w.Label("Last Auto AEC Mode: "+ctx.config.MicAutoProfileLastMode, "LC")
+
+		w.Row(15).Dynamic(2)
 		if w.CheckboxText("Display Monitor Sources", &ctx.config.DisplayMonitorSources) {
 			ctx.sourceListColdWidthIndex++ //recompute the with because of new elements
 			go writeConfig(ctx.config)
@@ -621,6 +627,14 @@ func applySingingAecPreset(ctx *ntcontext) {
 	// Keep echo cancellation enabled but disable speech-specific stages that
 	// often swallow near-end voice during double-talk (music + singing).
 	ctx.config.MicEnableWebRTC = true
+	applySingingAecOnlyPreset(ctx)
+
+	// Speech denoisers can heavily attenuate singing timbre, so disable by default.
+	ctx.config.MicEnableRNNoise = false
+	ctx.config.MicUseDeepFilterNet = false
+}
+
+func applySingingAecOnlyPreset(ctx *ntcontext) {
 	ctx.config.MicWebRTCNoiseSuppress = false
 	ctx.config.MicWebRTCAutoGain = false
 	ctx.config.MicWebRTCAnalogGain = false
@@ -628,8 +642,14 @@ func applySingingAecPreset(ctx *ntcontext) {
 	ctx.config.MicWebRTCHighPass = false
 	ctx.config.MicWebRTCExtended = true
 	ctx.config.MicWebRTCDelayAgnostic = true
+}
 
-	// Speech denoisers can heavily attenuate singing timbre, so disable by default.
-	ctx.config.MicEnableRNNoise = false
-	ctx.config.MicUseDeepFilterNet = false
+func applyVoiceAecOnlyPreset(ctx *ntcontext) {
+	ctx.config.MicWebRTCNoiseSuppress = true
+	ctx.config.MicWebRTCAutoGain = true
+	ctx.config.MicWebRTCAnalogGain = false
+	ctx.config.MicWebRTCVoiceDetect = true
+	ctx.config.MicWebRTCHighPass = true
+	ctx.config.MicWebRTCExtended = true
+	ctx.config.MicWebRTCDelayAgnostic = true
 }

@@ -16,6 +16,8 @@ import (
 type config struct {
 	Threshold              int
 	MicInputGainPercent    int
+	MicAutoProfile         bool
+	MicAutoProfileLastMode string
 	DisplayMonitorSources  bool
 	EnableUpdates          bool
 	FilterInput            bool
@@ -48,6 +50,8 @@ func initializeConfigIfNot() {
 	conf := config{
 		Threshold:              95,
 		MicInputGainPercent:    100,
+		MicAutoProfile:         false,
+		MicAutoProfileLastMode: "",
 		DisplayMonitorSources:  false,
 		EnableUpdates:          true,
 		FilterInput:            true,

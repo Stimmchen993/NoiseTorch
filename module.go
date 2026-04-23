@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
@@ -180,6 +181,10 @@ func loadSupressor(ctx *ntcontext, inp *device, out *device) error {
 	}
 
 	if inp.checked {
+		if err := maybeApplyAutoAecProfile(ctx); err != nil {
+			log.Printf("Couldn't auto-apply AEC profile: %v\n", err)
+		}
+
 		var err error
 		if ctx.serverInfo.servertype == servertype_pipewire {
 			err = loadPipeWireInput(ctx, inp)
@@ -590,6 +595,88 @@ func applyInputMicGain(ctx *ntcontext, inputSourceID string) error {
 		return fmt.Errorf("set-source-volume failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+func maybeApplyAutoAecProfile(ctx *ntcontext) error {
+	if ctx.serverInfo.servertype != servertype_pipewire || !ctx.config.MicAutoProfile || !ctx.config.MicEnableWebRTC {
+		return nil
+	}
+
+	mode, err := detectAutoAecProfileMode()
+	if err != nil {
+		return err
+	}
+	switch mode {
+	case "singing":
+		applySingingAecOnlyPreset(ctx)
+	case "voice":
+		applyVoiceAecOnlyPreset(ctx)
+	default:
+		return nil
+	}
+	ctx.config.MicAutoProfileLastMode = mode
+	writeConfig(ctx.config)
+	log.Printf("Auto AEC profile applied: %s\n", mode)
+	return nil
+}
+
+func detectAutoAecProfileMode() (string, error) {
+	out, err := exec.Command("pactl", "list", "sink-inputs").Output()
+	if err != nil {
+		return "", err
+	}
+
+	voiceKeywords := []string{"webrtc voiceengine", "discord", "teams", "zoom", "slack", "skype"}
+	var appNames []string
+	var mediaRoles []string
+
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		line := scanner.Text()
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "application.name = ") {
+			parts := strings.SplitN(trim, "=", 2)
+			if len(parts) == 2 {
+				appNames = append(appNames, strings.Trim(strings.TrimSpace(parts[1]), "\""))
+			}
+		}
+		if strings.HasPrefix(trim, "media.role = ") {
+			parts := strings.SplitN(trim, "=", 2)
+			if len(parts) == 2 {
+				mediaRoles = append(mediaRoles, strings.Trim(strings.TrimSpace(parts[1]), "\""))
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	for _, role := range mediaRoles {
+		r := strings.ToLower(role)
+		if strings.Contains(r, "music") || strings.Contains(r, "movie") || strings.Contains(r, "video") {
+			return "singing", nil
+		}
+	}
+
+	if len(appNames) == 0 {
+		return "voice", nil
+	}
+
+	for _, app := range appNames {
+		a := strings.ToLower(app)
+		isVoice := false
+		for _, kw := range voiceKeywords {
+			if strings.Contains(a, kw) {
+				isVoice = true
+				break
+			}
+		}
+		if !isVoice {
+			return "singing", nil
+		}
+	}
+
+	return "voice", nil
 }
 
 func resolveLadspaDenoiserConfig(ctx *ntcontext) (ladspaDenoiserConfig, error) {
