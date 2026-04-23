@@ -18,6 +18,7 @@ type CLIOpts struct {
 	setcap      bool
 	sinkName    string
 	unload      bool
+	loadLast    bool
 	loadInput   bool
 	loadOutput  bool
 	threshold   int
@@ -32,6 +33,7 @@ func parseCLIOpts() CLIOpts {
 	flag.StringVar(&opt.sinkName, "s", "", "Use the specified source/sink device ID")
 	flag.BoolVar(&opt.loadInput, "i", false, "Load supressor for input. If no source device ID is specified the default pulse audio source is used.")
 	flag.BoolVar(&opt.loadOutput, "o", false, "Load supressor for output. If no source device ID is specified the default pulse audio source is used.")
+	flag.BoolVar(&opt.loadLast, "load-last", false, "Load filter(s) using last-used input/output from config. Intended for startup.")
 	flag.BoolVar(&opt.unload, "u", false, "Unload supressor")
 	flag.IntVar(&opt.threshold, "t", -1, "Voice activation threshold")
 	flag.BoolVar(&opt.list, "l", false, "List available PulseAudio devices")
@@ -86,6 +88,13 @@ func doCLI(opt CLIOpts, config *config, librnnoise string) {
 
 	ctx.paClient = paClient
 
+	if opt.loadLast || opt.loadInput || opt.loadOutput {
+		if state, _ := supressorState(&ctx); state == loaded {
+			fmt.Println("NoiseTorch filters are already loaded.")
+			cleanupExit(librnnoise, 0)
+		}
+	}
+
 	if opt.list {
 		fmt.Println("Sources:")
 		sources := getSources(&ctx, paClient)
@@ -115,6 +124,70 @@ func doCLI(opt CLIOpts, config *config, librnnoise string) {
 		err := unloadSupressor(&ctx)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error unloading PulseAudio Module: %+v\n", err)
+			cleanupExit(librnnoise, 1)
+		}
+		cleanupExit(librnnoise, 0)
+	}
+
+	if opt.loadLast {
+		sources := getSources(&ctx, paClient)
+		sinks := getSinks(&ctx, paClient)
+
+		inp := device{}
+		out := device{}
+		inpFound := false
+		outFound := false
+
+		if ctx.config.FilterInput {
+			targetID := ctx.config.LastUsedInput
+			if targetID == "" {
+				if defaultSource, err := getDefaultSourceID(paClient); err == nil {
+					targetID = defaultSource
+				}
+			}
+			for i := range sources {
+				if sources[i].ID == targetID {
+					inp = sources[i]
+					inp.checked = true
+					inpFound = true
+					break
+				}
+			}
+			if !inpFound {
+				fmt.Fprintf(os.Stderr, "Configured input source not found: %s\n", targetID)
+				cleanupExit(librnnoise, 1)
+			}
+		}
+
+		if ctx.config.FilterOutput {
+			targetID := ctx.config.LastUsedOutput
+			if targetID == "" {
+				if defaultSink, err := getDefaultSinkID(paClient); err == nil {
+					targetID = defaultSink
+				}
+			}
+			for i := range sinks {
+				if sinks[i].ID == targetID {
+					out = sinks[i]
+					out.checked = true
+					outFound = true
+					break
+				}
+			}
+			if !outFound {
+				fmt.Fprintf(os.Stderr, "Configured output sink not found: %s\n", targetID)
+				cleanupExit(librnnoise, 1)
+			}
+		}
+
+		if !ctx.config.FilterInput && !ctx.config.FilterOutput {
+			fmt.Fprintln(os.Stderr, "No filters enabled in config; nothing to load.")
+			cleanupExit(librnnoise, 1)
+		}
+
+		err := loadSupressor(&ctx, &inp, &out)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading filter(s): %+v\n", err)
 			cleanupExit(librnnoise, 1)
 		}
 		cleanupExit(librnnoise, 0)
