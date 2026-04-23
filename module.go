@@ -18,8 +18,9 @@ const (
 )
 
 const (
-	pipewireWebRTCMicSource = "nui_pw_mic_webrtc_src"
-	pipewireWebRTCMicSink   = "nui_pw_mic_webrtc_sink"
+	pipewireWebRTCMicSource  = "nui_pw_mic_webrtc_src"
+	pipewireWebRTCMicSink    = "nui_pw_mic_webrtc_sink"
+	pipewireWebRTCMicRefSink = "nui_pw_mic_webrtc_ref_sink"
 )
 
 // the ugly and (partially) repeated strings are unforunately difficult to avoid, as it's what pulse audio expects
@@ -232,16 +233,21 @@ func loadPipeWireInput(ctx *ntcontext, inp *device) error {
 
 	stageSource := inp.ID
 	if ctx.config.MicEnableWebRTC {
-		sinkMaster, err := getDefaultSinkID(ctx.paClient)
-		if err != nil || sinkMaster == "" {
-			sinkMaster = "@DEFAULT_SINK@"
+		refSinkIdx, err := loadModule(ctx, "module-null-sink",
+			fmt.Sprintf("sink_name=%s rate=48000 channels=1 sink_properties=\"device.description='NoiseTorch WebRTC Ref'\"", pipewireWebRTCMicRefSink))
+		if err != nil {
+			return err
 		}
+		log.Printf("Loaded WebRTC reference sink as idx: %d\n", refSinkIdx)
 
 		aecArgs := pipeWireWebRTCAecArgs(ctx)
 		idx, err := loadModule(ctx, "module-echo-cancel",
-			fmt.Sprintf("source_name=%s sink_name=%s source_master=%s sink_master=%s aec_method=webrtc aec_args=\"%s\"",
-				pipewireWebRTCMicSource, pipewireWebRTCMicSink, inp.ID, sinkMaster, aecArgs))
+			fmt.Sprintf("source_name=%s sink_name=%s source_master=%s sink_master=%s rate=48000 channels=1 aec_method=webrtc aec_args=\"%s\"",
+				pipewireWebRTCMicSource, pipewireWebRTCMicSink, inp.ID, pipewireWebRTCMicRefSink, aecArgs))
 		if err != nil {
+			if unloadErr := unloadAllMatching(ctx.paClient, "module-null-sink", "sink_name="+pipewireWebRTCMicRefSink); unloadErr != nil {
+				log.Printf("Couldn't clean up WebRTC reference sink after load failure: %v\n", unloadErr)
+			}
 			return err
 		}
 		log.Printf("Loaded module-echo-cancel as idx: %d\n", idx)
@@ -401,6 +407,11 @@ func unloadSupressorPipeWire(ctx *ntcontext) error {
 
 	log.Printf("Searching for module-echo-cancel\n")
 	if err := unloadAllMatching(c, "module-echo-cancel", "source_name="+pipewireWebRTCMicSource); err != nil {
+		return err
+	}
+
+	log.Printf("Searching for WebRTC reference sink\n")
+	if err := unloadAllMatching(c, "module-null-sink", "sink_name="+pipewireWebRTCMicRefSink); err != nil {
 		return err
 	}
 	return nil
