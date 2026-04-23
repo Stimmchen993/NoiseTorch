@@ -206,6 +206,15 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 			maybeShowTooltip(w, "Enables the WebRTC echo-cancel/speech pipeline. Turn this off for zero AEC processing.")
 
 			if ctx.config.MicEnableWebRTC {
+				w.Row(25).Ratio(0.5, 0.45, 0.05)
+				w.Label("Target Loudness", "LC")
+				if w.SliderInt(-30, &ctx.config.MicTargetLUFS, -12, 1) {
+					go writeConfig(ctx.config)
+					ctx.reloadRequired = true
+				}
+				w.Label(fmt.Sprintf("%d LUFS", ctx.config.MicTargetLUFS), "RC")
+				maybeShowTooltip(w, "Approximate loudness goal for WebRTC AGC. Less negative is louder. Requires WebRTC Auto Gain for best effect.")
+
 				w.Row(15).Dynamic(2)
 				if w.CheckboxText("WebRTC Analog AGC", &ctx.config.MicWebRTCAnalogGain) {
 					go writeConfig(ctx.config)

@@ -231,8 +231,20 @@ func boolToInt(v bool) int {
 	return 0
 }
 
+func clampInt(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 func pipeWireWebRTCAecArgs(ctx *ntcontext) string {
-	return fmt.Sprintf("analog_gain_control=%d digital_gain_control=%d noise_suppression=%d voice_detection=%d high_pass_filter=%d extended_filter=%d delay_agnostic=%d",
+	targetLevelDBFS := clampInt(-ctx.config.MicTargetLUFS, 12, 30)
+
+	return fmt.Sprintf("analog_gain_control=%d digital_gain_control=%d noise_suppression=%d voice_detection=%d high_pass_filter=%d extended_filter=%d delay_agnostic=%d target_level_dbfs=%d",
 		boolToInt(ctx.config.MicWebRTCAnalogGain),
 		boolToInt(ctx.config.MicWebRTCAutoGain),
 		boolToInt(ctx.config.MicWebRTCNoiseSuppress),
@@ -240,6 +252,7 @@ func pipeWireWebRTCAecArgs(ctx *ntcontext) string {
 		boolToInt(ctx.config.MicWebRTCHighPass),
 		boolToInt(ctx.config.MicWebRTCExtended),
 		boolToInt(ctx.config.MicWebRTCDelayAgnostic),
+		targetLevelDBFS,
 	)
 }
 

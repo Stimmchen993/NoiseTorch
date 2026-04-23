@@ -28,6 +28,7 @@ type config struct {
 	MicUseDeepFilterNet    bool
 	MicDeepFilterControl   string
 	MicEnableWebRTC        bool
+	MicTargetLUFS          int
 	MicWebRTCNoiseSuppress bool
 	MicWebRTCAutoGain      bool
 	MicWebRTCAnalogGain    bool
@@ -62,6 +63,7 @@ func initializeConfigIfNot() {
 		MicUseDeepFilterNet:    false,
 		MicDeepFilterControl:   "100,0.0,-10,30,20,0",
 		MicEnableWebRTC:        false,
+		MicTargetLUFS:          -18,
 		MicWebRTCNoiseSuppress: true,
 		MicWebRTCAutoGain:      true,
 		MicWebRTCAnalogGain:    false,
@@ -134,6 +136,15 @@ func applyConfigDefaults(conf *config) {
 	}
 	if conf.MicDeepFilterControl == "" {
 		conf.MicDeepFilterControl = "100,0.0,-10,30,20,0"
+	}
+	if conf.MicTargetLUFS == 0 {
+		conf.MicTargetLUFS = -18
+	}
+	if conf.MicTargetLUFS < -30 {
+		conf.MicTargetLUFS = -30
+	}
+	if conf.MicTargetLUFS > -12 {
+		conf.MicTargetLUFS = -12
 	}
 
 	// Migrate pre-feature configs where these values were absent.
