@@ -129,6 +129,7 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 		if w.CheckboxText("Auto-Apply AEC Profile", &ctx.config.MicAutoProfile) {
 			go writeConfig(ctx.config)
 		}
+		maybeShowTooltip(w, "Automatically picks a voice or singing AEC profile when loading/reloading filters.")
 		w.Label("Last Auto AEC Mode: "+ctx.config.MicAutoProfileLastMode, "LC")
 
 		w.Row(15).Dynamic(2)
@@ -183,10 +184,12 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 				go writeConfig(ctx.config)
 				ctx.reloadRequired = true
 			}
+			maybeShowTooltip(w, "Turns on the denoiser stage (RNNoise or DeepFilterNet) before other processing.")
 			if w.CheckboxText("Use DeepFilterNet (LADSPA)", &ctx.config.MicUseDeepFilterNet) {
 				go writeConfig(ctx.config)
 				ctx.reloadRequired = true
 			}
+			maybeShowTooltip(w, "Uses DeepFilterNet instead of RNNoise. Higher quality but requires the LADSPA plugin.")
 
 			w.Row(15).Dynamic(1)
 			if ctx.config.MicUseDeepFilterNet {
@@ -200,6 +203,7 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 				go writeConfig(ctx.config)
 				ctx.reloadRequired = true
 			}
+			maybeShowTooltip(w, "Enables the WebRTC echo-cancel/speech pipeline. Turn this off for zero AEC processing.")
 
 			if ctx.config.MicEnableWebRTC {
 				w.Row(15).Dynamic(2)
@@ -207,34 +211,41 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
 				}
+				maybeShowTooltip(w, "Automatic analog gain control for low input levels before digital processing.")
 				if w.CheckboxText("WebRTC Auto Gain", &ctx.config.MicWebRTCAutoGain) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
 				}
+				maybeShowTooltip(w, "Digital automatic gain control to keep voice loudness more consistent.")
 
 				w.Row(15).Dynamic(2)
 				if w.CheckboxText("WebRTC Noise Suppression", &ctx.config.MicWebRTCNoiseSuppress) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
 				}
+				maybeShowTooltip(w, "Suppresses stationary background noise. Can affect tone when set too aggressively.")
 				if w.CheckboxText("WebRTC Voice Detection", &ctx.config.MicWebRTCVoiceDetect) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
 				}
+				maybeShowTooltip(w, "Optimizes processing for speech; disable this for singing or non-speech sources.")
 				if w.CheckboxText("WebRTC High-Pass", &ctx.config.MicWebRTCHighPass) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
 				}
+				maybeShowTooltip(w, "Removes low-end rumble and handling noise. May thin out very deep voices.")
 
 				w.Row(15).Dynamic(2)
 				if w.CheckboxText("WebRTC Extended Filter", &ctx.config.MicWebRTCExtended) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
 				}
+				maybeShowTooltip(w, "Stronger echo path modeling. Usually improves AEC in larger or reflective rooms.")
 				if w.CheckboxText("WebRTC Delay Agnostic", &ctx.config.MicWebRTCDelayAgnostic) {
 					go writeConfig(ctx.config)
 					ctx.reloadRequired = true
 				}
+				maybeShowTooltip(w, "Lets AEC adapt to unknown playback/capture delay when latency shifts at runtime.")
 			}
 
 			w.Row(25).Dynamic(1)
@@ -243,6 +254,7 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 				go writeConfig(ctx.config)
 				ctx.reloadRequired = true
 			}
+			maybeShowTooltip(w, "Balanced far-field speaking preset: keeps AEC on with speech-focused cleanup.")
 
 			w.Row(25).Dynamic(1)
 			if w.ButtonText("Apply Singing / Karaoke AEC Preset") {
@@ -250,6 +262,15 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 				go writeConfig(ctx.config)
 				ctx.reloadRequired = true
 			}
+			maybeShowTooltip(w, "Keeps AEC but disables speech-centric stages that can swallow singing.")
+
+			w.Row(25).Dynamic(1)
+			if w.ButtonText("Apply No-AEC Boost + Suppress Preset") {
+				applyNoAecBoostSuppressPreset(ctx)
+				go writeConfig(ctx.config)
+				ctx.reloadRequired = true
+			}
+			maybeShowTooltip(w, "Disables all WebRTC echo cancellation while keeping denoising and mic boost active.")
 		}
 
 		w.Row(15).Dynamic(2)
@@ -652,4 +673,28 @@ func applyVoiceAecOnlyPreset(ctx *ntcontext) {
 	ctx.config.MicWebRTCHighPass = true
 	ctx.config.MicWebRTCExtended = true
 	ctx.config.MicWebRTCDelayAgnostic = true
+}
+
+func applyNoAecBoostSuppressPreset(ctx *ntcontext) {
+	// Completely disable WebRTC echo cancellation/speech stages.
+	ctx.config.MicEnableWebRTC = false
+
+	// Keep denoising active.
+	ctx.config.MicEnableRNNoise = true
+
+	// Ensure practical boost for farther speaking distance.
+	if ctx.config.MicInputGainPercent < 140 {
+		ctx.config.MicInputGainPercent = 140
+	}
+
+	// Slightly relax VAD threshold to avoid dropouts at distance.
+	if ctx.config.Threshold > 85 || ctx.config.Threshold == 0 {
+		ctx.config.Threshold = 85
+	}
+}
+
+func maybeShowTooltip(w *nucular.Window, text string) {
+	if w.Input().Mouse.HoveringRect(w.LastWidgetBounds) {
+		w.Tooltip(text)
+	}
 }
