@@ -50,6 +50,11 @@ var updateURL = ""          // ditto
 var publicKeyString = ""    // ditto
 var websiteURL = ""         // ditto
 
+var (
+	pipewireVersionRe = regexp.MustCompile(`.*?on PipeWire (\d+)\.(\d+)\.(\d+).*?`)
+	pulseVersionRe    = regexp.MustCompile(`.*?(\d+)\.(\d+)\.?(\d+)?.*?`)
+)
+
 func main() {
 	if nameSuffix != "" {
 		appName += strings.Replace(nameSuffix, "_", " ", -1)
@@ -110,7 +115,12 @@ func dumpLib() string {
 	if err != nil {
 		log.Fatalf("Couldn't open temp file for librnnoise\n")
 	}
-	f.Write(libRNNoise)
+	if _, err := f.Write(libRNNoise); err != nil {
+		log.Fatalf("Couldn't write temp librnnoise: %v\n", err)
+	}
+	if err := f.Close(); err != nil {
+		log.Fatalf("Couldn't close temp librnnoise: %v\n", err)
+	}
 	log.Printf("Wrote temp librnnoise to: %s\n", f.Name())
 	return f.Name()
 }
@@ -126,10 +136,11 @@ func removeLib(file string) {
 func getSources(ctx *ntcontext, client *pulseaudio.Client) []device {
 	sources, err := client.Sources()
 	if err != nil {
-		log.Printf("Couldn't fetch sources from pulseaudio\n")
+		log.Printf("Couldn't fetch sources from pulseaudio: %v\n", err)
+		return nil
 	}
 
-	outputs := make([]device, 0)
+	outputs := make([]device, 0, len(sources))
 	for i := range sources {
 		if strings.Contains(sources[i].Name, "nui_") || strings.Contains(sources[i].Name, "Filtered") {
 			continue
@@ -158,10 +169,11 @@ func getSources(ctx *ntcontext, client *pulseaudio.Client) []device {
 func getSinks(ctx *ntcontext, client *pulseaudio.Client) []device {
 	sources, err := client.Sinks()
 	if err != nil {
-		log.Printf("Couldn't fetch sources from pulseaudio\n")
+		log.Printf("Couldn't fetch sources from pulseaudio: %v\n", err)
+		return nil
 	}
 
-	inputs := make([]device, 0)
+	inputs := make([]device, 0, len(sources))
 	for i := range sources {
 		if strings.Contains(sources[i].Name, "nui_") || strings.Contains(sources[i].Name, "Filtered") {
 			continue
@@ -230,6 +242,7 @@ func serverInfo(paClient *pulseaudio.Client) (audioserverinfo, error) {
 	if err != nil {
 		log.Printf("Couldn't fetch pulse server info: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Couldn't fetch pulse server info: %v\n", err)
+		return audioserverinfo{}, err
 	}
 
 	pkgname := info.PackageName
@@ -240,7 +253,6 @@ func serverInfo(paClient *pulseaudio.Client) (audioserverinfo, error) {
 	var servername string
 	var servertype uint
 	var major, minor, patch int
-	var versionRegex *regexp.Regexp
 	var versionString string
 
 	var outdatedPipeWire bool
@@ -248,17 +260,19 @@ func serverInfo(paClient *pulseaudio.Client) (audioserverinfo, error) {
 	if isPipewire {
 		servername = "PipeWire"
 		servertype = servertype_pipewire
-		versionRegex = regexp.MustCompile(`.*?on PipeWire (\d+)\.(\d+)\.(\d+).*?`)
 		versionString = pkgname
 		log.Printf("Detected PipeWire\n")
 	} else {
 		servername = "PulseAudio"
 		servertype = servertype_pulse
-		versionRegex = regexp.MustCompile(`.*?(\d+)\.(\d+)\.?(\d+)?.*?`)
 		versionString = info.PackageVersion
 		log.Printf("Detected PulseAudio\n")
 	}
 
+	versionRegex := pulseVersionRe
+	if isPipewire {
+		versionRegex = pipewireVersionRe
+	}
 	res := versionRegex.FindStringSubmatch(versionString)
 	if len(res) != 4 {
 		log.Printf("couldn't parse server version, regexp didn't match version: %s\n", versionString)
@@ -281,7 +295,7 @@ func serverInfo(paClient *pulseaudio.Client) (audioserverinfo, error) {
 	if err != nil {
 		return audioserverinfo{servertype: servertype}, err
 	}
-	if isPipewire && major <= 0 && minor <= 3 && patch < 28 {
+	if isPipewire && major == 0 && (minor < 3 || (minor == 3 && patch < 28)) {
 		log.Printf("pipewire version %d.%d.%d too old.\n", major, minor, patch)
 		outdatedPipeWire = true
 	}

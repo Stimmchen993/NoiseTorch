@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/BurntSushi/toml"
 )
@@ -23,6 +24,8 @@ type config struct {
 }
 
 const configFile = "config.toml"
+
+var configFileMu sync.Mutex
 
 func initializeConfigIfNot() {
 	log.Println("Checking if config needs to be initialized")
@@ -62,6 +65,9 @@ func initializeConfigIfNot() {
 }
 
 func readConfig() *config {
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+
 	f := filepath.Join(configDir(), configFile)
 	config := config{}
 	if _, err := toml.DecodeFile(f, &config); err != nil {
@@ -72,12 +78,18 @@ func readConfig() *config {
 }
 
 func writeConfig(conf *config) {
+	configFileMu.Lock()
+	defer configFileMu.Unlock()
+
 	f := filepath.Join(configDir(), configFile)
 	var buffer bytes.Buffer
 	if err := toml.NewEncoder(&buffer).Encode(&conf); err != nil {
-		log.Fatalf("Couldn't write config file: %v\n", err)
+		log.Printf("Couldn't encode config file: %v\n", err)
+		return
 	}
-	os.WriteFile(f, buffer.Bytes(), 0644)
+	if err := os.WriteFile(f, buffer.Bytes(), 0644); err != nil {
+		log.Printf("Couldn't write config file: %v\n", err)
+	}
 }
 
 func configDir() string {

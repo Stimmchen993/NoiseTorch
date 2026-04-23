@@ -36,7 +36,7 @@ type ntcontext struct {
 	virtualDeviceInUse       bool
 }
 
-//TODO pull some of these strucs out of UI, they don't belong here
+// TODO pull some of these strucs out of UI, they don't belong here
 type audioserverinfo struct {
 	servertype       uint
 	name             string
@@ -106,7 +106,7 @@ func mainView(ctx *ntcontext, w *nucular.Window) {
 
 	if ctx.serverInfo.servertype == servertype_pipewire {
 		w.Row(20).Dynamic(1)
-		w.Label("Running in PipeWire mode. PipeWire support is currently alpha quality. Please report bugs.", "LC")
+		w.Label("Running in PipeWire mode.", "LC")
 	}
 
 	if ctx.update.available && !ctx.update.triggered {
@@ -278,9 +278,10 @@ func uiUnloadFilters(ctx *ntcontext) {
 	}
 	//wait until PA reports it has actually loaded it, timeout at 10s
 	for i := 0; i < 20; i++ {
-		if state, _ := supressorState(ctx); state != unloaded {
-			time.Sleep(time.Millisecond * 500)
+		if state, _ := supressorState(ctx); state == unloaded {
+			break
 		}
+		time.Sleep(time.Millisecond * 500)
 	}
 	ctx.views.Pop()
 	(*ctx.masterWindow).Changed()
@@ -299,9 +300,10 @@ func uiReloadFilters(ctx *ntcontext, inp, out device) {
 
 	//wait until PA reports it has actually loaded it, timeout at 10s
 	for i := 0; i < 20; i++ {
-		if state, _ := supressorState(ctx); state != loaded {
-			time.Sleep(time.Millisecond * 500)
+		if state, _ := supressorState(ctx); state == loaded {
+			break
 		}
+		time.Sleep(time.Millisecond * 500)
 	}
 	ctx.config.LastUsedInput = inp.ID
 	ctx.config.LastUsedOutput = out.ID

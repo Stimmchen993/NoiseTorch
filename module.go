@@ -24,6 +24,7 @@ func updateNoiseSupressorLoaded(ctx *ntcontext) {
 	upd, err := c.Updates()
 	if err != nil {
 		fmt.Printf("Error listening for updates: %v\n", err)
+		return
 	}
 
 	for {
@@ -43,12 +44,16 @@ func supressorState(ctx *ntcontext) (int, bool) {
 	var virtualDeviceInUse bool = false
 	if ctx.config.FilterInput {
 		if ctx.serverInfo.servertype == servertype_pipewire {
-			module, ladspasource, err := findModule(c, "module-ladspa-source", "source_name='Filtered Microphone")
-			if err != nil {
-				log.Printf("Couldn't fetch module list to check for module-ladspa-source: %v\n", err)
+			if pipeWireNativeHasInput() {
+				inpLoaded = true
+			} else {
+				module, ladspasource, err := findModule(c, "module-ladspa-source", "source_name='Filtered Microphone")
+				if err != nil {
+					log.Printf("Couldn't fetch module list to check for module-ladspa-source: %v\n", err)
+				}
+				virtualDeviceInUse = virtualDeviceInUse || (module.NUsed != 0)
+				inpLoaded = ladspasource
 			}
-			virtualDeviceInUse = virtualDeviceInUse || (module.NUsed != 0)
-			inpLoaded = ladspasource
 			inputInc = false
 		} else {
 			_, nullsink, err := findModule(c, "module-null-sink", "sink_name=nui_mic_denoised_out")
@@ -82,13 +87,18 @@ func supressorState(ctx *ntcontext) (int, bool) {
 
 	if ctx.config.FilterOutput {
 		if ctx.serverInfo.servertype == servertype_pipewire {
-			module, ladspasink, err := findModule(c, "module-ladspa-sink", "sink_name='Filtered Headphones'")
-			if err != nil {
-				log.Printf("Couldn't fetch module list to check for module-ladspa-sink: %v\n", err)
+			if pipeWireNativeHasOutput() {
+				outLoaded = true
+				outputInc = false
+			} else {
+				module, ladspasink, err := findModule(c, "module-ladspa-sink", "sink_name='Filtered Headphones'")
+				if err != nil {
+					log.Printf("Couldn't fetch module list to check for module-ladspa-sink: %v\n", err)
+				}
+				virtualDeviceInUse = virtualDeviceInUse || (module.NUsed != 0)
+				outLoaded = ladspasink
+				outputInc = false
 			}
-			virtualDeviceInUse = virtualDeviceInUse || (module.NUsed != 0)
-			outLoaded = ladspasink
-			outputInc = false
 		} else {
 			_, out, err := findModule(c, "module-null-sink", "sink_name=nui_out_out_sink")
 			if err != nil {
@@ -155,10 +165,19 @@ func loadSupressor(ctx *ntcontext, inp *device, out *device) error {
 		log.Printf("Rlimit: %+v\n", newLim)
 	}
 
+	if ctx.serverInfo.servertype == servertype_pipewire {
+		if err := loadPipeWireNative(ctx, inp, out); err != nil {
+			log.Printf("Native PipeWire load failed: %v\n", err)
+			return err
+		}
+		log.Printf("Loaded native PipeWire backend\n")
+		return nil
+	}
+
 	if inp.checked {
 		var err error
 		if ctx.serverInfo.servertype == servertype_pipewire {
-			err = loadPipeWireInput(ctx, inp)
+			err = loadPipeWireInputLegacy(ctx, inp)
 		} else {
 			err = loadPulseInput(ctx, inp)
 		}
@@ -195,7 +214,7 @@ func loadModule(ctx *ntcontext, module, args string) (uint32, error) {
 	return idx, err
 }
 
-func loadPipeWireInput(ctx *ntcontext, inp *device) error {
+func loadPipeWireInputLegacy(ctx *ntcontext, inp *device) error {
 	log.Printf("Loading supressor for pipewire\n")
 	idx, err := loadModule(ctx, "module-ladspa-source",
 		fmt.Sprintf("source_name='Filtered Microphone for %s' master=%s "+
@@ -306,6 +325,13 @@ func unloadSupressor(ctx *ntcontext) error {
 
 func unloadSupressorPipeWire(ctx *ntcontext) error {
 	log.Printf("Unloading modules for pipewire\n")
+
+	if changed, err := unloadPipeWireNative(); err != nil {
+		log.Printf("Failed to unload native PipeWire config: %v\n", err)
+	} else if changed {
+		log.Printf("Unloaded native PipeWire filter-chain config\n")
+		return nil
+	}
 
 	log.Printf("Searching for module-ladspa-source\n")
 	c := ctx.paClient
